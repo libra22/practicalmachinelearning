@@ -1,0 +1,171 @@
+---
+title: "Exercise Prediction"
+author: "Poobalan"
+date: "December 23, 2015"
+output: html_document
+---
+###Introduction
+training data consisting of 19622 observations and 161 variables from accelerometers on the belt, forearm, arm, and dumbell of 6 participants is used to develop a model and predict the outcome for test data of 20 observations. 
+
+###Loading Data and Libraries
+Two sets of data is loaded. training consist of data used for training and validating the model, while testing is used for prediction.
+
+```{r load, cache=TRUE}
+training <- read.csv("pml-training.csv",na.strings = c("NA","#DIV/0!", ""))
+testing <- read.csv("pml-testing.csv")
+```
+
+Load relevant libraries and set seed value for reproducibility.
+```{r loadlibrary, echo=FALSE, message=FALSE}
+library(caret)
+library(kernlab)
+library(doParallel)
+library(randomForest)
+library(knitr)
+set.seed(12345) #ensure reproducibility
+```
+
+###Data Exploration
+Based on exploring training data using **str()** and **summary()**, it is found that some columns are not relevant to the model prediction namely **X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window and num_window**. 
+Also, many columns have NA values in them which renders these columns unable to affect the model outcome.
+Finally, columns that have numerical values are wrongly set to factor. This also needs to be fixed.
+```{r explore, cache=TRUE}
+str(training)
+summary(training)
+```
+
+###Data Cleaning
+Firstly, columns which are wrongly classed as factor are set as numeric and the **classe** column is set as factor.
+```{r clean}
+training$kurtosis_roll_belt <- as.numeric(training$kurtosis_roll_belt)
+training$kurtosis_picth_belt <- as.numeric(training$kurtosis_picth_belt)
+training$kurtosis_yaw_belt <- as.numeric(training$kurtosis_yaw_belt)
+training$skewness_roll_belt <- as.numeric(training$skewness_roll_belt)
+training$skewness_roll_belt.1 <- as.numeric(training$skewness_roll_belt.1)
+training$skewness_yaw_belt <- as.numeric(training$skewness_yaw_belt)
+training$max_yaw_belt <- as.numeric(training$max_yaw_belt)
+training$amplitude_yaw_belt <- as.numeric(training$amplitude_yaw_belt)
+training$kurtosis_roll_arm <- as.numeric(training$kurtosis_roll_arm)
+training$kurtosis_picth_arm <- as.numeric(training$kurtosis_picth_arm)
+training$kurtosis_yaw_arm <- as.numeric(training$kurtosis_yaw_arm)
+training$skewness_roll_arm <- as.numeric(training$skewness_roll_arm)
+training$skewness_picth_arm <- as.numeric(training$skewness_pitch_arm)
+training$skewness_yaw_arm <- as.numeric(training$skewness_yaw_arm)
+training$kurtosis_roll_dumbbell <- as.numeric(training$kurtosis_roll_dumbbell)
+training$kurtosis_picth_dumbbell <- as.numeric(training$kurtosis_picth_dumbbell)
+training$kurtosis_yaw_dumbbell <- as.numeric(training$kurtosis_yaw_dumbbell)
+training$skewness_roll_dumbbell <- as.numeric(training$skewness_roll_dumbbell)
+training$skewness_pitch_dumbbell <- as.numeric(training$skewness_pitch_dumbbell)
+training$skewness_yaw_dumbbell <- as.numeric(training$skewness_yaw_dumbbell)
+training$max_yaw_dumbbell <- as.numeric(training$max_yaw_dumbbell)
+training$min_yaw_dumbbell <- as.numeric(training$min_yaw_dumbbell)
+training$min_yaw_belt <- as.numeric(training$min_yaw_belt)
+training$classe <- as.factor(training$classe)
+```
+
+Secondly, irrelevant columns are removed (first seven columns in the dataset).
+```{r removecols, cache=TRUE,echo=TRUE}
+training.cols.removed <- training[,-(1:7)]
+```
+
+Thirdly, columns that have high percentage of NAs are removed. For this exercise, any column with NAs comprising more than 2.5% of the data is removed.
+```{r removena}
+limit <- 0.025 * nrow(training.cols.removed) #limit for NA is 2.5%
+training.na.removed <- training.cols.removed[, which(as.numeric(colSums(is.na(training.cols.removed)))<limit)]
+```
+
+The cleaned training dataset is created:
+```{r cleandata}
+training.clean <- training.na.removed
+```
+
+Comparing distribution of **classe** before and after cleaning shows no difference, meaning the cleaning process did not affect the number of rows.
+```{r plot, fig.width= 8, fig.height=6, cache=TRUE}
+qplot(training$classe, geom="histogram")
+qplot(training.clean$classe, geom="histogram")
+```
+
+###Training and Validation Set
+The cleaned training set is split into **traindata** and **validatedata** at 60/40 ratio.
+```{r createset}
+inTrain <- createDataPartition(y=training.clean$classe, p=0.6,list=FALSE)
+traindata <- training.clean[inTrain, ]
+validatedata <- training.clean[-inTrain,]
+```
+
+
+###Model Training
+For the purpose of this exercise, ***random forest*** method is used to train the model. Random forest classification method is among the top two performing algorithms in prediction contests, thus is chosen for this exercise.
+```{r trainmodel,cache=TRUE}
+modelFitrf <- train(classe ~ ., data=traindata, method="rf", trControl = trainControl(method="oob",allowParallel = TRUE))
+modelFitrf
+modelFitrf$finalModel
+```
+Accuracy is **99.125** for mtry=2.
+
+Prediction using the traindata set returns accuracy of 1 (in sample error is 0%).
+```{r predicttrain, cache=TRUE}
+predictions <- predict(modelFitrf, newdata=traindata)
+confusionMatrix(predictions, traindata$classe)
+```
+
+
+The model is validated using the **validatedata** dataset
+```{r, validate}
+predictions <- predict(modelFitrf, newdata=validatedata)
+confusionMatrix(predictions, validatedata$classe)
+```
+Based on the accuracy (0.9924) using validation data, the out sample error rate is (1-0.9924)= 0.0076 or **0.76%**.
+
+Using varImp, the importance of the variables in random forest model is displayed.
+```{r var, fig.width=8,fig.height=6}
+varlist <- varImp(modelFitrf)
+plot(varlist,top=30)
+```
+From the plot above, we can see that less than ten variables have importance more than 50%. Variables more than 50% importance is selected from the training set and pairwise plot is created.
+
+```{r pairs,fig.width=8,fig.height=8}
+topvars <- subset(varlist$importance,varlist$importance$Overall>50)
+sort(topvars$Overall,decreasing=TRUE)
+selcols <- training.clean[,c(rownames(topvars))]
+pairs(selcols)
+```
+
+At total of seven variables were identified.
+
+Variable **magnet_dumbbell_y** seems to have an outlier value and further investigation shows a value of -3600 compared to other values between 633 and -744.
+
+###Prediction
+The model is then used to predict the class for each of the 20 observations in the testing dataset. The data is written out using the given function **pml_write_files()**
+```{r predict}
+predictions <- predict(modelFitrf, newdata=testing)
+
+predictions
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predictions)
+```
+
+###Summary
+1. Random forest algorithm able to predict to high degree of accuracy.
+2. Columns with many NAs are removed to improve model.
+3. Other variables not provided in dataset may also affect actual prediction but due to limited data available, this is the best can be done.
+
+
+###Reference
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har

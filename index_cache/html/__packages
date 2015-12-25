@@ -1,0 +1,10 @@
+base
+lattice
+ggplot2
+caret
+kernlab
+foreach
+iterators
+doParallel
+randomForest
+knitr
